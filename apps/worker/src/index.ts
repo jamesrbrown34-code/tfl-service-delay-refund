@@ -24,7 +24,7 @@ const journeyRowSchema = z.object({
   rawSource: z.string()
 });
 
-const TARGET_CARD_ID = "060105052041";
+const TARGET_CARD_ID = process.env.OYSTER_CARD_ID?.trim();
 const IMPORT_API_URL = "https://localhost:59256/journeys/import";
 
 function parseJourneyAction(action: string): { startStation: string; endStation: string } {
@@ -75,7 +75,7 @@ async function clickAcceptAllCookiesIfPresent(page: Page): Promise<void> {
   }
 }
 
-async function waitForCardAfterLogin(page: Page, cardSelector: string): Promise<void> {
+async function waitForCardAfterLogin(page: Page, cardSelector: string, cardId: string): Promise<void> {
   const timeoutMs = 180_000;
   const pollIntervalMs = 1_000;
   const startedAt = Date.now();
@@ -91,7 +91,7 @@ async function waitForCardAfterLogin(page: Page, cardSelector: string): Promise<
     await page.waitForTimeout(pollIntervalMs);
   }
 
-  throw new Error(`Timed out waiting for Oyster card ${TARGET_CARD_ID} to appear after manual login.`);
+  throw new Error(`Timed out waiting for Oyster card ${cardId} to appear after manual login.`);
 }
 
 async function postJourneyImport(payload: JourneyRow[]): Promise<Response> {
@@ -133,8 +133,12 @@ async function main(): Promise<void> {
 
   console.log("Manual login checkpoint: complete login and 2FA in the opened browser.");
 
+  if (!TARGET_CARD_ID) {
+    throw new Error("Missing OYSTER_CARD_ID environment variable. Set it before running the worker.");
+  }
+
   const cardSelector = `.indiv-card2.panel[data-id="${TARGET_CARD_ID}"]`;
-  await waitForCardAfterLogin(page, cardSelector);
+  await waitForCardAfterLogin(page, cardSelector, TARGET_CARD_ID);
   await page.locator(cardSelector).click();
 
   await clickAcceptAllCookiesIfPresent(page);
