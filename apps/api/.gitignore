@@ -1,0 +1,7 @@
+# .NET build outputs
+bin/
+obj/
+
+# IDE/user state
+*.user
+*.suo

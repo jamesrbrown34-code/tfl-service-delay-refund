@@ -1,4 +1,5 @@
-node_modules/
+# Database artifacts
 *.db
+
+# Logs
 *.log
-apps/worker/storage-state.json
