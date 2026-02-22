@@ -16,13 +16,15 @@ app.UseCors();
 var dataDirectory = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../data"));
 Directory.CreateDirectory(dataDirectory);
 var csvPath = Path.Combine(dataDirectory, "journeys.csv");
+var expectedTimesPath = Environment.GetEnvironmentVariable("EXPECTED_JOURNEY_TIMES_CSV_PATH")
+    ?? Path.Combine(dataDirectory, "expected_journey_times_metropolitan.csv");
 EnsureCsvFile(csvPath);
 
 app.MapGet("/", () => Results.Ok(new
 {
     service = "tfl-delay-refund-api",
     status = "ok",
-    endpoints = new[] { "/health", "/journeys", "/journeys/import" }
+    endpoints = new[] { "/health", "/journeys", "/journeys/import", "/expected-journey-times" }
 }));
 
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
@@ -35,6 +37,23 @@ app.MapGet("/journeys", () =>
         .ToList();
 
     return Results.Ok(journeys);
+});
+
+app.MapGet("/expected-journey-times", (string? startStation, string? endStation) =>
+{
+    var query = ReadExpectedJourneyTimes(expectedTimesPath).AsEnumerable();
+
+    if (!string.IsNullOrWhiteSpace(startStation))
+    {
+        query = query.Where(r => r.StartStation.Equals(startStation, StringComparison.OrdinalIgnoreCase));
+    }
+
+    if (!string.IsNullOrWhiteSpace(endStation))
+    {
+        query = query.Where(r => r.EndStation.Equals(endStation, StringComparison.OrdinalIgnoreCase));
+    }
+
+    return Results.Ok(query.ToList());
 });
 
 app.MapPost("/journeys/import", (IReadOnlyList<JourneyRecord> journeys) =>
@@ -186,4 +205,59 @@ static List<string> ParseCsvLine(string line)
 
     values.Add(sb.ToString());
     return values;
+}
+
+static List<ExpectedJourneyTimeRecord> ReadExpectedJourneyTimes(string csvPath)
+{
+    if (!File.Exists(csvPath))
+    {
+        return [];
+    }
+
+    var lines = File.ReadAllLines(csvPath);
+    if (lines.Length <= 1)
+    {
+        return [];
+    }
+
+    var rows = new List<ExpectedJourneyTimeRecord>();
+
+    for (var i = 1; i < lines.Length; i++)
+    {
+        var line = lines[i];
+        if (string.IsNullOrWhiteSpace(line))
+        {
+            continue;
+        }
+
+        var cells = ParseCsvLine(line);
+        if (cells.Count < 8)
+        {
+            continue;
+        }
+
+        rows.Add(new ExpectedJourneyTimeRecord(
+            cells[0],
+            cells[1],
+            cells[2],
+            ParseNullableDecimal(cells[3]),
+            ParseNullableDecimal(cells[4]),
+            ParseNullableDecimal(cells[5]),
+            ParseNullableDecimal(cells[6]),
+            cells[7]));
+    }
+
+    return rows;
+}
+
+static decimal? ParseNullableDecimal(string value)
+{
+    if (string.IsNullOrWhiteSpace(value))
+    {
+        return null;
+    }
+
+    return decimal.TryParse(value, CultureInfo.InvariantCulture, out var parsed)
+        ? parsed
+        : null;
 }
