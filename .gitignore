@@ -3,6 +3,7 @@
 
 # Runtime data artifacts
 data/*.csv
+data/**/*.csv
 
 # Database artifacts (legacy if used)
 *.db

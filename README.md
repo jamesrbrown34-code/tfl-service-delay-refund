@@ -158,6 +158,33 @@ curl -X POST http://localhost:5080/journeys/import \
   ]'
 ```
 
+
+### Timetable data source
+
+- TfL timetables: https://tfl.gov.uk/travel-information/timetables/
+
+### Expected journey times (Metropolitan line static extract)
+
+- `GET /expected-journey-times`
+- Optional query params: `startStation`, `endStation`
+- Backed by a local CSV path from `EXPECTED_JOURNEY_TIMES_CSV_PATH` (or default `data/expected_journey_times_metropolitan.csv`). Keep this file local/untracked so it is never committed.
+
+Create the CSV locally (untracked):
+
+```bash
+mkdir -p data
+cp /secure/location/expected_journey_times_metropolitan.csv data/expected_journey_times_metropolitan.csv
+# or set a custom path
+export EXPECTED_JOURNEY_TIMES_CSV_PATH=/secure/location/expected_journey_times_metropolitan.csv
+```
+
+Example:
+
+```bash
+curl "http://localhost:5080/expected-journey-times?startStation=Harrow-on-the-Hill"
+```
+
+
 ---
 
 ## 5) CSV procedures (MVP data store)
