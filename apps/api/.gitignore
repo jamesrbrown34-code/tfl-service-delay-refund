@@ -1,0 +1,10 @@
+# .NET build outputs
+bin/
+obj/
+
+# IDE/user state
+*.user
+*.suo
+
+# Local debug profile overrides
+Properties/launchSettings.json

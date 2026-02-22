@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>TfL Delay Refund - Journeys</title>
+    <style>
+      body { font-family: Arial, sans-serif; margin: 2rem; background: #f8fafc; color: #0f172a; }
+      h1 { margin-bottom: 0.5rem; }
+      button { background: #2563eb; color: #fff; border: none; padding: 0.5rem 0.75rem; border-radius: 6px; cursor: pointer; }
+      table { margin-top: 1rem; width: 100%; border-collapse: collapse; background: #fff; }
+      th, td { border: 1px solid #cbd5e1; padding: 0.5rem; text-align: left; }
+      .muted { color: #475569; }
+    </style>
+  </head>
+  <body>
+    <h1>Imported journeys</h1>
+    <p class="muted">Week 1 proof: local list sourced from the API import table.</p>
+    <button id="refresh">Refresh</button>
+    <div id="status" class="muted"></div>
+    <table id="journeyTable">
+      <thead>
+        <tr>
+          <th>Start</th>
+          <th>End</th>
+          <th>Started</th>
+          <th>Ended</th>
+          <th>Fare</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+
+    <script src="./main.js" type="module"></script>
+  </body>
+</html>

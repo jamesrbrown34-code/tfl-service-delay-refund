@@ -1,0 +1,10 @@
+# Node dependencies
+node_modules/
+
+# Playwright/runtime outputs
+playwright-report/
+test-results/
+storage-state.json
+
+# Logs
+*.log

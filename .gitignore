@@ -1,0 +1,11 @@
+# Visual Studio workspace state
+.vs/
+
+# Runtime data artifacts
+data/*.csv
+
+# Database artifacts (legacy if used)
+*.db
+
+# Logs
+*.log
