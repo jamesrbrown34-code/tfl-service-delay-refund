@@ -5,3 +5,6 @@ obj/
 # IDE/user state
 *.user
 *.suo
+
+# Local debug profile overrides
+Properties/launchSettings.json

@@ -1,3 +1,6 @@
+# Visual Studio workspace state
+.vs/
+
 # Runtime data artifacts
 data/*.csv
 
