@@ -25,13 +25,35 @@ Local-first Week 1 foundation for importing Oyster journey history and storing i
 
 ---
 
-## 2) First-time setup
 
-### 2.1 API dependencies
+## C# solution layout
+
+The API is wired into a standard C# solution file at the repository root:
+
+- `tfl-service-delay-refund.sln`
+- project: `apps/api/TflDelayRefund.Api.csproj`
+
+Useful commands:
 
 ```bash
-cd apps/api
-dotnet restore
+# restore all .NET projects in the solution
+dotnet restore tfl-service-delay-refund.sln
+
+# build all .NET projects in the solution
+dotnet build tfl-service-delay-refund.sln
+
+# run the API project
+dotnet run --project apps/api/TflDelayRefund.Api.csproj
+```
+
+---
+
+## 2) First-time setup
+
+### 2.1 API dependencies (solution-based)
+
+```bash
+dotnet restore tfl-service-delay-refund.sln
 ```
 
 ### 2.2 Worker dependencies
@@ -50,11 +72,10 @@ npx playwright install chromium
 
 Open **3 terminals**.
 
-### Terminal A — Start API
+### Terminal A — Start API (via solution project)
 
 ```bash
-cd apps/api
-dotnet run
+dotnet run --project apps/api/TflDelayRefund.Api.csproj
 ```
 
 Expected:
@@ -206,7 +227,7 @@ cp data/tfl-delay-refund.db data/tfl-delay-refund.backup.db
 ## 6) Troubleshooting
 
 ### `dotnet: command not found`
-Install .NET 8 SDK and rerun `dotnet restore` / `dotnet run`.
+Install .NET 8 SDK and rerun `dotnet restore tfl-service-delay-refund.sln` / `dotnet run --project apps/api/TflDelayRefund.Api.csproj`.
 
 ### Worker cannot install packages (`npm 403`)
 This is usually environment policy or registry/network restriction. Use a network with npm registry access.
