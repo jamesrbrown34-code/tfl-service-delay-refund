@@ -1,4 +1,4 @@
-import { chromium } from "playwright";
+import { chromium, type Page } from "playwright";
 import { writeFile } from "node:fs/promises";
 import { z } from "zod";
 
@@ -58,6 +58,72 @@ function parseFare(value: string): number {
   return Number.isNaN(parsed) ? 0 : parsed;
 }
 
+async function clickAcceptAllCookiesIfPresent(page: Page): Promise<void> {
+  const cookieButtons = [
+    'button:has-text("Accept all cookies")',
+    'a:has-text("Accept all cookies")',
+    'button:has-text("Accept all")',
+    'a:has-text("Accept all")'
+  ];
+
+  for (const selector of cookieButtons) {
+    const button = page.locator(selector).first();
+    if ((await button.count()) > 0 && (await button.isVisible().catch(() => false))) {
+      await button.click().catch(() => undefined);
+      return;
+    }
+  }
+}
+
+async function waitForCardAfterLogin(page: Page, cardSelector: string): Promise<void> {
+  const timeoutMs = 180_000;
+  const pollIntervalMs = 1_000;
+  const startedAt = Date.now();
+
+  while (Date.now() - startedAt < timeoutMs) {
+    await clickAcceptAllCookiesIfPresent(page);
+
+    const card = page.locator(cardSelector).first();
+    if ((await card.count()) > 0 && (await card.isVisible().catch(() => false))) {
+      return;
+    }
+
+    await page.waitForTimeout(pollIntervalMs);
+  }
+
+  throw new Error(`Timed out waiting for Oyster card ${TARGET_CARD_ID} to appear after manual login.`);
+}
+
+async function postJourneyImport(payload: JourneyRow[]): Promise<Response> {
+  try {
+    return await fetch(IMPORT_API_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+  } catch (error) {
+    const certError =
+      error instanceof Error &&
+      "cause" in error &&
+      (error as { cause?: { code?: string } }).cause?.code === "DEPTH_ZERO_SELF_SIGNED_CERT";
+
+    if (!certError) {
+      throw error;
+    }
+
+    console.warn(
+      "Self-signed certificate detected on import endpoint; retrying with TLS verification disabled for local development."
+    );
+    process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+
+    return await fetch(IMPORT_API_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+  }
+}
+
 async function main(): Promise<void> {
   const browser = await chromium.launch({ headless: false });
   const context = await browser.newContext();
@@ -66,17 +132,18 @@ async function main(): Promise<void> {
   await page.goto("https://oyster.tfl.gov.uk/", { waitUntil: "domcontentloaded" });
 
   console.log("Manual login checkpoint: complete login and 2FA in the opened browser.");
-  await page.waitForTimeout(45_000);
 
   const cardSelector = `.indiv-card2.panel[data-id="${TARGET_CARD_ID}"]`;
-  await page.waitForSelector(cardSelector, { timeout: 60_000 });
+  await waitForCardAfterLogin(page, cardSelector);
   await page.locator(cardSelector).click();
 
+  await clickAcceptAllCookiesIfPresent(page);
   await page
     .locator('li.col-md-6 a.list-group-item:has-text("View journey history")')
     .first()
     .click();
 
+  await clickAcceptAllCookiesIfPresent(page);
   await page.waitForSelector("#date-range-button", { timeout: 30_000 });
   await page.locator("#date-range-button").click();
 
@@ -92,7 +159,7 @@ async function main(): Promise<void> {
     }
 
     const cells = row.locator("td");
-    const text = (await cells.allInnerTexts()).map((cellText) => cellText.trim());
+    const text = (await cells.allInnerTexts()).map((cellText: string) => cellText.trim());
     if (text.length < 4) {
       continue;
     }
@@ -118,11 +185,7 @@ async function main(): Promise<void> {
 
   await writeFile("./journey-history.json", JSON.stringify(payload, null, 2), "utf8");
 
-  const response = await fetch(IMPORT_API_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload)
-  });
+  const response = await postJourneyImport(payload);
 
   console.log("Imported rows", payload.length, "status", response.status);
   await context.storageState({ path: "./storage-state.json" });
