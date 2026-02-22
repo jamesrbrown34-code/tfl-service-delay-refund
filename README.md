@@ -221,3 +221,36 @@ Also confirm the web server is running via `cd apps/web && npm run start`.
 - Journey table parsing is intentionally conservative and placeholder-level.
 - Session reuse exists (`storage-state.json`) but refresh/expiry handling is not yet implemented.
 - Eligibility rules and claim submission are not in this slice.
+
+
+## 8) Founder notes: semi-manual operations + monetisation
+
+### Reminder workflow for the new TfL automatic CSV email
+
+- In the web app, use the **Email CSV setup reminder** checkbox and keep it unchecked until the setup email arrives.
+- Once you complete setup in your TfL account, tick the checkbox so the reminder state persists in your browser.
+- Use the built-in copy button to send a forwarding setup template to clients.
+
+### Client forwarding (future multi-client version)
+
+Recommended onboarding flow:
+1. Each client signs consent terms and appoints you as processor for journey-email data.
+2. They create an email forwarding rule for monthly TfL CSV/journey emails to your ingest mailbox.
+3. Your worker ingests CSVs, maps records to the client account, and computes likely refunds.
+4. You provide a summary + claim pack for approval before final submission.
+
+### Pricing model ideas
+
+- **Performance fee**: charge 10–25% of successful refunds collected.
+- **Hybrid**: small monthly platform fee + lower performance fee.
+- **Minimum fee floor**: apply only when refunds exceed a threshold (e.g., £10/month).
+
+### Free tier with ads
+
+- Keep the current semi-manual UI as the free tier (ad-supported).
+- Add a paid tier that removes ads and enables managed forwarding + automated checks.
+- Suggested ad placement: top banner + a small panel near report summaries; avoid interrupting claim actions.
+- Keep ad scripts isolated and optional so core import/refund flows still function if ad blockers are active.
+
+---
+
