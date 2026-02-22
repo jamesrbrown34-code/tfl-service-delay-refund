@@ -1,4 +1,5 @@
-import { chromium } from "playwright";
+import { chromium, type Page } from "playwright";
+import { writeFile } from "node:fs/promises";
 import { z } from "zod";
 
 type JourneyRow = {
@@ -23,6 +24,106 @@ const journeyRowSchema = z.object({
   rawSource: z.string()
 });
 
+const TARGET_CARD_ID = process.env.OYSTER_CARD_ID?.trim();
+const IMPORT_API_URL = "https://localhost:59256/journeys/import";
+
+function parseJourneyAction(action: string): { startStation: string; endStation: string } {
+  const cleaned = action.replace(/\s+/g, " ").trim();
+  const separators = [" to ", " - ", " → ", " > "];
+
+  for (const separator of separators) {
+    if (cleaned.includes(separator)) {
+      const [start, end] = cleaned.split(separator, 2);
+      return {
+        startStation: start?.trim() || "Unknown",
+        endStation: end?.trim() || "Unknown"
+      };
+    }
+  }
+
+  return {
+    startStation: cleaned || "Unknown",
+    endStation: "Unknown"
+  };
+}
+
+function parseDateTime(value: string): string {
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? new Date().toISOString() : parsed.toISOString();
+}
+
+function parseFare(value: string): number {
+  const cleaned = value.replace(/[^0-9.-]+/g, "");
+  const parsed = Number.parseFloat(cleaned);
+  return Number.isNaN(parsed) ? 0 : parsed;
+}
+
+async function clickAcceptAllCookiesIfPresent(page: Page): Promise<void> {
+  const cookieButtons = [
+    'button:has-text("Accept all cookies")',
+    'a:has-text("Accept all cookies")',
+    'button:has-text("Accept all")',
+    'a:has-text("Accept all")'
+  ];
+
+  for (const selector of cookieButtons) {
+    const button = page.locator(selector).first();
+    if ((await button.count()) > 0 && (await button.isVisible().catch(() => false))) {
+      await button.click().catch(() => undefined);
+      return;
+    }
+  }
+}
+
+async function waitForCardAfterLogin(page: Page, cardSelector: string, cardId: string): Promise<void> {
+  const timeoutMs = 180_000;
+  const pollIntervalMs = 1_000;
+  const startedAt = Date.now();
+
+  while (Date.now() - startedAt < timeoutMs) {
+    await clickAcceptAllCookiesIfPresent(page);
+
+    const card = page.locator(cardSelector).first();
+    if ((await card.count()) > 0 && (await card.isVisible().catch(() => false))) {
+      return;
+    }
+
+    await page.waitForTimeout(pollIntervalMs);
+  }
+
+  throw new Error(`Timed out waiting for Oyster card ${cardId} to appear after manual login.`);
+}
+
+async function postJourneyImport(payload: JourneyRow[]): Promise<Response> {
+  try {
+    return await fetch(IMPORT_API_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+  } catch (error) {
+    const certError =
+      error instanceof Error &&
+      "cause" in error &&
+      (error as { cause?: { code?: string } }).cause?.code === "DEPTH_ZERO_SELF_SIGNED_CERT";
+
+    if (!certError) {
+      throw error;
+    }
+
+    console.warn(
+      "Self-signed certificate detected on import endpoint; retrying with TLS verification disabled for local development."
+    );
+    process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+
+    return await fetch(IMPORT_API_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+  }
+}
+
 async function main(): Promise<void> {
   const browser = await chromium.launch({ headless: false });
   const context = await browser.newContext();
@@ -31,47 +132,64 @@ async function main(): Promise<void> {
   await page.goto("https://oyster.tfl.gov.uk/", { waitUntil: "domcontentloaded" });
 
   console.log("Manual login checkpoint: complete login and 2FA in the opened browser.");
-  await page.waitForTimeout(45_000);
 
-  // Placeholder for selector work: intentionally conservative until a real account walkthrough is done.
-  await page.goto("https://oyster.tfl.gov.uk/oyster/history.do", { waitUntil: "domcontentloaded" });
+  if (!TARGET_CARD_ID) {
+    throw new Error("Missing OYSTER_CARD_ID environment variable. Set it before running the worker.");
+  }
 
-  const rows = await page.locator("table tbody tr").all();
+  const cardSelector = `.indiv-card2.panel[data-id="${TARGET_CARD_ID}"]`;
+  await waitForCardAfterLogin(page, cardSelector, TARGET_CARD_ID);
+  await page.locator(cardSelector).click();
+
+  await clickAcceptAllCookiesIfPresent(page);
+  await page
+    .locator('li.col-md-6 a.list-group-item:has-text("View journey history")')
+    .first()
+    .click();
+
+  await clickAcceptAllCookiesIfPresent(page);
+  await page.waitForSelector("#date-range-button", { timeout: 30_000 });
+  await page.locator("#date-range-button").click();
+
+  await page.waitForSelector("table.table.journeyhistory tbody", { timeout: 30_000 });
+
+  const rows = await page.locator("table.table.journeyhistory tbody tr").all();
   const parsed: JourneyRow[] = [];
 
   for (const row of rows) {
-    const cells = row.locator("td");
-    const text = await cells.allInnerTexts();
-    if (text.length < 5) {
+    const noDataText = (await row.innerText()).trim();
+    if (noDataText.includes("There is no journey history to display")) {
       continue;
     }
 
+    const cells = row.locator("td");
+    const text = (await cells.allInnerTexts()).map((cellText: string) => cellText.trim());
+    if (text.length < 4) {
+      continue;
+    }
+
+    const dateTime = text[0] ?? "";
+    const journeyAction = text[1] ?? "";
+    const charge = text[2] ?? "";
+    const { startStation, endStation } = parseJourneyAction(journeyAction);
+
     parsed.push({
       id: crypto.randomUUID(),
-      oysterCardId: "primary",
-      startStation: text[0]?.trim() ?? "Unknown",
-      endStation: text[1]?.trim() ?? "Unknown",
-      startedAt: new Date().toISOString(),
-      endedAt: new Date().toISOString(),
-      fare: Number.parseFloat((text[4] ?? "0").replace("£", "")) || 0,
+      oysterCardId: TARGET_CARD_ID,
+      startStation,
+      endStation,
+      startedAt: parseDateTime(dateTime),
+      endedAt: parseDateTime(dateTime),
+      fare: parseFare(charge),
       rawSource: text.join(" | ")
     });
   }
 
-  const payload = parsed.map((journey) => {
-    const valid = journeyRowSchema.parse(journey);
-    return {
-      ...valid,
-      startedAt: valid.startedAt,
-      endedAt: valid.endedAt
-    };
-  });
+  const payload = parsed.map((journey) => journeyRowSchema.parse(journey));
 
-  const response = await fetch("http://localhost:5080/journeys/import", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload)
-  });
+  await writeFile("./journey-history.json", JSON.stringify(payload, null, 2), "utf8");
+
+  const response = await postJourneyImport(payload);
 
   console.log("Imported rows", payload.length, "status", response.status);
   await context.storageState({ path: "./storage-state.json" });
