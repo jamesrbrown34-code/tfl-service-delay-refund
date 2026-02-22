@@ -18,6 +18,13 @@ Directory.CreateDirectory(dataDirectory);
 var csvPath = Path.Combine(dataDirectory, "journeys.csv");
 EnsureCsvFile(csvPath);
 
+app.MapGet("/", () => Results.Ok(new
+{
+    service = "tfl-delay-refund-api",
+    status = "ok",
+    endpoints = new[] { "/health", "/journeys", "/journeys/import" }
+}));
+
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 
 app.MapGet("/journeys", () =>
