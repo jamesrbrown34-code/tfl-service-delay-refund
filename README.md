@@ -17,7 +17,6 @@ Local-first Week 1 foundation for importing Oyster journey history and storing i
 
 - **.NET 8 SDK** (`dotnet --version`)
 - **Node.js 22+ + npm** (`node --version`, `npm --version`)
-- **Python 3** for serving the static UI (`python3 --version`)
 
 ### Useful (optional)
 
@@ -56,7 +55,14 @@ dotnet run --project apps/api/TflDelayRefund.Api.csproj
 dotnet restore tfl-service-delay-refund.sln
 ```
 
-### 2.2 Worker dependencies
+### 2.2 Web dependencies
+
+```bash
+cd apps/web
+npm install
+```
+
+### 2.3 Worker dependencies
 
 ```bash
 cd apps/worker
@@ -95,11 +101,11 @@ Should return JSON like:
 {"status":"ok"}
 ```
 
-### Terminal B — Start Web UI
+### Terminal B — Start Web UI (Node)
 
 ```bash
 cd apps/web
-python3 -m http.server 4173
+npm run start
 ```
 
 Open: `http://localhost:4173`
@@ -237,6 +243,7 @@ Selectors in `apps/worker/src/index.ts` are currently a Week 1 scaffold and may 
 
 ### Web page shows load error
 Confirm API is running and reachable on `http://localhost:5080`.
+Also confirm the web server is running via `cd apps/web && npm run start`.
 
 ---
 
