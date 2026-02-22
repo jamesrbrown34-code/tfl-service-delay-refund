@@ -25,6 +25,7 @@ const journeyRowSchema = z.object({
 });
 
 const TARGET_CARD_ID = "060105052041";
+const IMPORT_API_URL = "https://localhost:59256/journeys/import";
 
 function parseJourneyAction(action: string): { startStation: string; endStation: string } {
   const cleaned = action.replace(/\s+/g, " ").trim();
@@ -117,7 +118,7 @@ async function main(): Promise<void> {
 
   await writeFile("./journey-history.json", JSON.stringify(payload, null, 2), "utf8");
 
-  const response = await fetch("http://localhost:5080/journeys/import", {
+  const response = await fetch(IMPORT_API_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload)
