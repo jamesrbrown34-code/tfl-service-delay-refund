@@ -1,13 +1,13 @@
 # TfL Service Delay Refund
 
-Local-first Week 1 foundation for importing Oyster journey history and storing it in SQLite.
+Local-first Week 1 foundation for importing Oyster journey history with a simplified **CSV-backed** MVP data store.
 
 ## What is in this repo
 
-- `apps/api`: ASP.NET Core Minimal API that owns SQLite migrations and journey import/query endpoints.
+- `apps/api`: ASP.NET Core Minimal API that imports and serves journey records from CSV.
 - `apps/worker`: Playwright + TypeScript worker for human-in-the-loop login + journey scrape.
 - `apps/web`: Minimal static UI that lists imported journeys from the API.
-- `data/`: Runtime SQLite DB location (created automatically).
+- `data/`: Runtime CSV data location (created automatically).
 
 ---
 
@@ -18,12 +18,7 @@ Local-first Week 1 foundation for importing Oyster journey history and storing i
 - **.NET 8 SDK** (`dotnet --version`)
 - **Node.js 22+ + npm** (`node --version`, `npm --version`)
 
-### Useful (optional)
-
-- `sqlite3` CLI for direct DB inspection (`sqlite3 --version`)
-
 ---
-
 
 ## C# solution layout
 
@@ -86,8 +81,7 @@ dotnet run --project apps/api/TflDelayRefund.Api.csproj
 
 Expected:
 - API available on `http://localhost:5080`
-- DB auto-created at `data/tfl-delay-refund.db`
-- Migration `001_init.sql` auto-applied on startup
+- CSV store auto-created at `data/journeys.csv`
 
 Quick check:
 
@@ -143,6 +137,7 @@ After worker completes, refresh the web page to see imported journeys.
 
 - `POST /journeys/import`
 - Request body: array of journey records
+- Records are upserted by `id` into `data/journeys.csv`
 
 Example:
 
@@ -165,67 +160,40 @@ curl -X POST http://localhost:5080/journeys/import \
 
 ---
 
-## 5) Database procedures (SQLite)
+## 5) CSV procedures (MVP data store)
 
-DB file path (default):
+CSV file path:
 
 ```text
-data/tfl-delay-refund.db
+data/journeys.csv
 ```
 
-### 5.1 Open DB in sqlite3
+### 5.1 View CSV header/rows
 
 ```bash
-sqlite3 data/tfl-delay-refund.db
+head -n 20 data/journeys.csv
 ```
 
-### 5.2 List tables
+### 5.2 Count imported rows (excluding header)
 
-```sql
-.tables
+```bash
+tail -n +2 data/journeys.csv | wc -l
 ```
 
-### 5.3 Inspect journeys schema
-
-```sql
-.schema journeys
-```
-
-### 5.4 Query latest journeys
-
-```sql
-SELECT id, oyster_card_id, start_station, end_station, started_at_utc, ended_at_utc, fare, imported_at_utc
-FROM journeys
-ORDER BY started_at_utc DESC
-LIMIT 20;
-```
-
-### 5.5 Count imported journeys
-
-```sql
-SELECT COUNT(*) AS total_journeys FROM journeys;
-```
-
-### 5.6 Delete all journey rows (keep table)
-
-```sql
-DELETE FROM journeys;
-```
-
-### 5.7 Reset DB completely
+### 5.3 Reset journey data
 
 Stop API first, then:
 
 ```bash
-rm -f data/tfl-delay-refund.db
+rm -f data/journeys.csv
 ```
 
-Restart API to recreate DB and re-apply migrations.
+Restart API to recreate CSV with header.
 
-### 5.8 Backup DB
+### 5.4 Backup CSV
 
 ```bash
-cp data/tfl-delay-refund.db data/tfl-delay-refund.backup.db
+cp data/journeys.csv data/journeys.backup.csv
 ```
 
 ---
@@ -249,6 +217,7 @@ Also confirm the web server is running via `cd apps/web && npm run start`.
 
 ## 7) Current limitations (Week 1 scaffold)
 
+- CSV storage is intentionally simple for MVP and not optimized for multi-user concurrency.
 - Journey table parsing is intentionally conservative and placeholder-level.
 - Session reuse exists (`storage-state.json`) but refresh/expiry handling is not yet implemented.
 - Eligibility rules and claim submission are not in this slice.

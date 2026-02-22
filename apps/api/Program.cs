@@ -1,10 +1,8 @@
-using Microsoft.Data.Sqlite;
+using System.Globalization;
+using System.Text;
 using TflDelayRefund.Api.Models;
 
 var builder = WebApplication.CreateBuilder(args);
-
-var connectionString = builder.Configuration.GetConnectionString("Sqlite")
-    ?? "Data Source=../../data/tfl-delay-refund.db";
 
 builder.Services.AddCors(options =>
 {
@@ -15,88 +13,170 @@ builder.Services.AddCors(options =>
 var app = builder.Build();
 app.UseCors();
 
-Directory.CreateDirectory(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../data")));
-ApplyMigrations(connectionString);
+var dataDirectory = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../data"));
+Directory.CreateDirectory(dataDirectory);
+var csvPath = Path.Combine(dataDirectory, "journeys.csv");
+EnsureCsvFile(csvPath);
 
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 
 app.MapGet("/journeys", () =>
 {
-    using var connection = new SqliteConnection(connectionString);
-    connection.Open();
+    var journeys = ReadJourneys(csvPath)
+        .OrderByDescending(j => j.StartedAt)
+        .Take(500)
+        .ToList();
 
-    using var command = connection.CreateCommand();
-    command.CommandText = @"
-        SELECT id, oyster_card_id, start_station, end_station, started_at_utc, ended_at_utc, fare, raw_source
-        FROM journeys
-        ORDER BY started_at_utc DESC
-        LIMIT 500;";
-
-    using var reader = command.ExecuteReader();
-    var results = new List<JourneyRecord>();
-    while (reader.Read())
-    {
-        results.Add(new JourneyRecord(
-            reader.GetString(0),
-            reader.GetString(1),
-            reader.GetString(2),
-            reader.GetString(3),
-            DateTimeOffset.Parse(reader.GetString(4)),
-            DateTimeOffset.Parse(reader.GetString(5)),
-            Convert.ToDecimal(reader.GetDouble(6)),
-            reader.GetString(7)
-        ));
-    }
-
-    return Results.Ok(results);
+    return Results.Ok(journeys);
 });
 
 app.MapPost("/journeys/import", (IReadOnlyList<JourneyRecord> journeys) =>
 {
-    using var connection = new SqliteConnection(connectionString);
-    connection.Open();
-    using var transaction = connection.BeginTransaction();
+    var existing = ReadJourneys(csvPath)
+        .ToDictionary(j => j.Id, StringComparer.Ordinal);
 
     foreach (var journey in journeys)
     {
-        using var command = connection.CreateCommand();
-        command.CommandText = @"
-            INSERT OR REPLACE INTO journeys
-                (id, oyster_card_id, start_station, end_station, started_at_utc, ended_at_utc, fare, raw_source)
-            VALUES
-                ($id, $oysterCardId, $startStation, $endStation, $startedAtUtc, $endedAtUtc, $fare, $rawSource);";
-
-        command.Parameters.AddWithValue("$id", journey.Id);
-        command.Parameters.AddWithValue("$oysterCardId", journey.OysterCardId);
-        command.Parameters.AddWithValue("$startStation", journey.StartStation);
-        command.Parameters.AddWithValue("$endStation", journey.EndStation);
-        command.Parameters.AddWithValue("$startedAtUtc", journey.StartedAt.UtcDateTime.ToString("O"));
-        command.Parameters.AddWithValue("$endedAtUtc", journey.EndedAt.UtcDateTime.ToString("O"));
-        command.Parameters.AddWithValue("$fare", journey.Fare);
-        command.Parameters.AddWithValue("$rawSource", journey.RawSource);
-
-        command.ExecuteNonQuery();
+        existing[journey.Id] = journey;
     }
 
-    transaction.Commit();
-    return Results.Accepted($"/journeys", new { imported = journeys.Count });
+    WriteJourneys(csvPath, existing.Values.OrderByDescending(j => j.StartedAt));
+    return Results.Accepted("/journeys", new { imported = journeys.Count });
 });
 
 app.Run();
 
-static void ApplyMigrations(string connectionString)
+static void EnsureCsvFile(string csvPath)
 {
-    using var connection = new SqliteConnection(connectionString);
-    connection.Open();
-
-    var migrationSqlPath = Path.Combine(AppContext.BaseDirectory, "Migrations", "001_init.sql");
-    if (!File.Exists(migrationSqlPath))
+    if (File.Exists(csvPath))
     {
-        migrationSqlPath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../apps/api/Migrations/001_init.sql"));
+        return;
     }
 
-    var migrationSql = File.ReadAllText(migrationSqlPath);
-    using var command = connection.CreateCommand();
-    command.CommandText = migrationSql;
-    command.ExecuteNonQuery();
+    var header = "id,oysterCardId,startStation,endStation,startedAt,endedAt,fare,rawSource";
+    File.WriteAllText(csvPath, header + Environment.NewLine, Encoding.UTF8);
+}
+
+static List<JourneyRecord> ReadJourneys(string csvPath)
+{
+    if (!File.Exists(csvPath))
+    {
+        return [];
+    }
+
+    var lines = File.ReadAllLines(csvPath);
+    if (lines.Length <= 1)
+    {
+        return [];
+    }
+
+    var journeys = new List<JourneyRecord>();
+    for (var i = 1; i < lines.Length; i++)
+    {
+        var line = lines[i];
+        if (string.IsNullOrWhiteSpace(line))
+        {
+            continue;
+        }
+
+        var cells = ParseCsvLine(line);
+        if (cells.Count < 8)
+        {
+            continue;
+        }
+
+        if (!DateTimeOffset.TryParse(cells[4], CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var startedAt))
+        {
+            continue;
+        }
+
+        if (!DateTimeOffset.TryParse(cells[5], CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var endedAt))
+        {
+            continue;
+        }
+
+        if (!decimal.TryParse(cells[6], CultureInfo.InvariantCulture, out var fare))
+        {
+            fare = 0;
+        }
+
+        journeys.Add(new JourneyRecord(
+            cells[0],
+            cells[1],
+            cells[2],
+            cells[3],
+            startedAt,
+            endedAt,
+            fare,
+            cells[7]));
+    }
+
+    return journeys;
+}
+
+static void WriteJourneys(string csvPath, IEnumerable<JourneyRecord> journeys)
+{
+    var rows = new List<string>
+    {
+        "id,oysterCardId,startStation,endStation,startedAt,endedAt,fare,rawSource"
+    };
+
+    rows.AddRange(journeys.Select(j => string.Join(",",
+        EscapeCsv(j.Id),
+        EscapeCsv(j.OysterCardId),
+        EscapeCsv(j.StartStation),
+        EscapeCsv(j.EndStation),
+        EscapeCsv(j.StartedAt.UtcDateTime.ToString("O", CultureInfo.InvariantCulture)),
+        EscapeCsv(j.EndedAt.UtcDateTime.ToString("O", CultureInfo.InvariantCulture)),
+        EscapeCsv(j.Fare.ToString(CultureInfo.InvariantCulture)),
+        EscapeCsv(j.RawSource))));
+
+    File.WriteAllLines(csvPath, rows, Encoding.UTF8);
+}
+
+static string EscapeCsv(string value)
+{
+    if (!value.Contains('"') && !value.Contains(',') && !value.Contains('\n') && !value.Contains('\r'))
+    {
+        return value;
+    }
+
+    return $"\"{value.Replace("\"", "\"\"")}\"";
+}
+
+static List<string> ParseCsvLine(string line)
+{
+    var values = new List<string>();
+    var sb = new StringBuilder();
+    var inQuotes = false;
+
+    for (var i = 0; i < line.Length; i++)
+    {
+        var c = line[i];
+
+        if (c == '"')
+        {
+            if (inQuotes && i + 1 < line.Length && line[i + 1] == '"')
+            {
+                sb.Append('"');
+                i++;
+                continue;
+            }
+
+            inQuotes = !inQuotes;
+            continue;
+        }
+
+        if (c == ',' && !inQuotes)
+        {
+            values.Add(sb.ToString());
+            sb.Clear();
+            continue;
+        }
+
+        sb.Append(c);
+    }
+
+    values.Add(sb.ToString());
+    return values;
 }
